@@ -1,0 +1,20 @@
+internet:
+    calibration: "python3 apps/calibration/create_blank_camera.py ${data}"
+    extract_image: none
+    extract_keypoints: "python3 apps/preprocess/extract_keypoints.py ${data} --mode yolo-hrnet"
+    fit:
+        data: config/data/multivideo.yml
+        model: config/model/smpl.yml
+        exp: config/fit/1v1p_local_runtime.yml
+        opt_model: [args.model_path, "/Users/manoharpaturi/Desktop/mocap_manu/basicmodel_m_lbs_10_207_0_v1.0.0.npz"]
+    output: output-smpl-3d
+internet-rotate:
+    calibration: "python3 apps/calibration/create_blank_camera.py ${data}"
+    extract_image: none
+    extract_keypoints: "python3 apps/preprocess/extract_keypoints.py ${data} --mode yolo-hrnet"
+    fit:
+        data: config/data/multivideo.yml
+        model: config/model/smpl.yml
+        exp: config/fit/1v1p_local_runtime.yml
+        opt_model: [args.model_path, "/Users/manoharpaturi/Desktop/mocap_manu/basicmodel_m_lbs_10_207_0_v1.0.0.npz"]
+    output: output-smpl-3d

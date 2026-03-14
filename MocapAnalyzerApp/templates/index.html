@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>manu_mocap</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="bg-shape bg-a"></div>
+  <div class="bg-shape bg-b"></div>
+  <main class="container">
+    <section class="card hero">
+      <h1>manu_mocap</h1>
+      <p>Upload one video. Get complete EasyMocap-based motion analysis.</p>
+      <p class="hint">Persistent jobs, progress tracking, report export, and artifact download included.</p>
+    </section>
+
+    <section class="grid-2">
+      <section class="card">
+        <h2>New Job</h2>
+        <form id="uploadForm">
+          <label for="mode">Processing mode</label>
+          <select id="mode" name="mode">
+            <option value="fast">Fast</option>
+            <option value="balanced" selected>Balanced</option>
+            <option value="accurate">Accurate</option>
+          </select>
+
+          <label for="video">Video file</label>
+          <input id="video" name="video" type="file" accept="video/*" required />
+
+          <button type="submit">Start Analysis</button>
+        </form>
+
+        <hr />
+        <h3>Mrudula Full-Node Stickman</h3>
+        <p class="hint">Uses mocap_data.db pose33 + face468 + hands from Mrudula Motion-capture.</p>
+        <label for="externalFolder">Motion-capture folder</label>
+        <input id="externalFolder" type="text" value="/Users/manoharpaturi/Desktop/Mrudula/Motion-capture" />
+        <label for="externalTable">Session table (optional)</label>
+        <input id="externalTable" type="text" placeholder="session_YYYYMMDD_HHMMSS" />
+        <button id="generateExternalBtn" type="button">Generate External Full-Node Stickman</button>
+        <a id="externalStickmanLink" href="#" target="_blank" hidden>Open External Stickman Animation</a>
+      </section>
+
+      <section class="card">
+        <h2>Job History</h2>
+        <div id="jobsList" class="jobs-list"></div>
+      </section>
+    </section>
+
+    <section class="card" id="statusCard" hidden>
+      <h2>Job Status</h2>
+      <p id="statusText">Queued</p>
+      <div class="progress-wrap">
+        <div id="progressBar" class="progress-bar"></div>
+      </div>
+      <pre id="logView"></pre>
+    </section>
+
+    <section class="grid-2" id="resultGrid" hidden>
+      <section class="card" id="reportCard" hidden>
+        <h2>Analysis Report</h2>
+        <div id="reportJson"></div>
+        <button id="generateStickmanBtn" type="button">Generate Stickman Animation</button>
+        <a id="stickmanVideoLink" href="#" target="_blank" hidden>Open Stickman Animation</a>
+        <button id="generateFullNodesBtn" type="button">Generate Full-Node Analysis Video (Normal, Lite Model)</button>
+        <a id="fullNodesVideoLink" href="#" target="_blank" hidden>Open Full-Node Analysis Video</a>
+        <button id="generatePlotsBtn" type="button">Generate Motion Plot Animation</button>
+        <a id="plotsVideoLink" href="#" target="_blank" hidden>Open Motion Plot Animation</a>
+        <a id="downloadMd" href="#" target="_blank">Download Markdown Report</a>
+      </section>
+
+      <section class="card" id="artifactsCard" hidden>
+        <h2>Artifacts</h2>
+        <ul id="artifactList"></ul>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    let currentJobId = null;
+    let pollTimer = null;
+
+    function humanTime(ts) {
+      try {
+        return new Date(ts).toLocaleString();
+      } catch {
+        return ts;
+      }
+    }
+
+    function renderJobs(jobs) {
+      const root = document.getElementById("jobsList");
+      root.innerHTML = "";
+      if (!jobs.length) {
+        root.innerHTML = "<p class='hint'>No jobs yet.</p>";
+        return;
+      }
+      for (const job of jobs) {
+        const btn = document.createElement("button");
+        btn.className = "job-item";
+        btn.type = "button";
+        btn.innerHTML = `
+          <span><strong>${job.mode}</strong> | ${job.status}</span>
+          <span>${humanTime(job.created_at)}</span>
+        `;
+        btn.addEventListener("click", async () => {
+          currentJobId = job.job_id;
+          if (pollTimer) clearInterval(pollTimer);
+          await pollJob(currentJobId);
+          pollTimer = setInterval(() => pollJob(currentJobId), 4000);
+        });
+        root.appendChild(btn);
+      }
+    }
+
+    async function loadJobs() {
+      const res = await fetch("/api/jobs");
+      if (!res.ok) return;
+      const data = await res.json();
+      renderJobs(data.jobs || []);
+    }
+
+    function renderReport(report) {
+      const root = document.getElementById("reportJson");
+      root.innerHTML = "";
+
+      const entries = [
+        ["Workflow", report.methodology.workflow],
+        ["Video Duration (s)", report.video.duration_sec],
+        ["Resolution", `${report.video.width} x ${report.video.height}`],
+        ["FPS", report.video.fps],
+        ["Total Images", report.frames.total_images],
+        ["Annotation Files", report.detections.annotation_files],
+        ["Avg People/Frame", report.detections.avg_people_per_frame],
+        ["SMPL Frames", report.smpl.smpl_frames],
+        ["Persons Tracked", report.smpl.persons_detected],
+        ["Mean Translation Speed", report.smpl.mean_translation_speed],
+        ["Max Translation Speed", report.smpl.max_translation_speed],
+      ];
+
+      for (const [k, v] of entries) {
+        const row = document.createElement("div");
+        row.className = "row";
+        row.innerHTML = `<strong>${k}</strong><span>${v ?? "n/a"}</span>`;
+        root.appendChild(row);
+      }
+    }
+
+    async function renderArtifacts(jobId) {
+      const res = await fetch(`/api/jobs/${jobId}/artifacts`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const list = document.getElementById("artifactList");
+      list.innerHTML = "";
+      for (const item of data.artifacts || []) {
+        const li = document.createElement("li");
+        const link = document.createElement("a");
+        link.href = `/api/jobs/${jobId}/artifacts/file/${encodeURIComponent(item).replaceAll("%2F", "/")}`;
+        link.textContent = item;
+        link.target = "_blank";
+        li.appendChild(link);
+        list.appendChild(li);
+
+        if (item === "analysis/motion_plots.mp4") {
+          const plotsLink = document.getElementById("plotsVideoLink");
+          plotsLink.hidden = false;
+          plotsLink.href = `/api/jobs/${jobId}/artifacts/file/${encodeURIComponent(item).replaceAll("%2F", "/")}`;
+        }
+        if (item === "analysis/stickman_animation.mp4") {
+          const stickLink = document.getElementById("stickmanVideoLink");
+          stickLink.hidden = false;
+          stickLink.href = `/api/jobs/${jobId}/artifacts/file/${encodeURIComponent(item).replaceAll("%2F", "/")}`;
+        }
+        if (item === "analysis/full_nodes_analysis.mp4") {
+          const fullNodesLink = document.getElementById("fullNodesVideoLink");
+          fullNodesLink.hidden = false;
+          fullNodesLink.href = `/api/jobs/${jobId}/artifacts/file/${encodeURIComponent(item).replaceAll("%2F", "/")}`;
+        }
+      }
+      document.getElementById("artifactsCard").hidden = false;
+    }
+
+    async function generateStickman(jobId) {
+      const btn = document.getElementById("generateStickmanBtn");
+      const original = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Generating...";
+      try {
+        const res = await fetch(`/api/jobs/${jobId}/visualize/stickman`, { method: "POST" });
+        const data = await res.json();
+        if (!res.ok) {
+          alert(data.detail || "Failed to generate stickman animation");
+          return;
+        }
+        const item = data.artifact;
+        const stickLink = document.getElementById("stickmanVideoLink");
+        stickLink.hidden = false;
+        stickLink.href = `/api/jobs/${jobId}/artifacts/file/${encodeURIComponent(item).replaceAll("%2F", "/")}`;
+        await renderArtifacts(jobId);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = original;
+      }
+    }
+
+    async function generatePlots(jobId) {
+      const btn = document.getElementById("generatePlotsBtn");
+      const original = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Generating...";
+      try {
+        const res = await fetch(`/api/jobs/${jobId}/visualize/plots`, { method: "POST" });
+        const data = await res.json();
+        if (!res.ok) {
+          alert(data.detail || "Failed to generate plots video");
+          return;
+        }
+        const item = data.artifact;
+        const plotsLink = document.getElementById("plotsVideoLink");
+        plotsLink.hidden = false;
+        plotsLink.href = `/api/jobs/${jobId}/artifacts/file/${encodeURIComponent(item).replaceAll("%2F", "/")}`;
+        await renderArtifacts(jobId);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = original;
+      }
+    }
+
+    async function generateFullNodes(jobId) {
+      const btn = document.getElementById("generateFullNodesBtn");
+      const original = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Generating...";
+      try {
+        const res = await fetch(`/api/jobs/${jobId}/visualize/fullnodes`, { method: "POST" });
+        const data = await res.json();
+        if (!res.ok) {
+          alert(data.detail || "Failed to generate full-node analysis video");
+          return;
+        }
+        const item = data.artifact;
+        const fullNodesLink = document.getElementById("fullNodesVideoLink");
+        fullNodesLink.hidden = false;
+        fullNodesLink.href = `/api/jobs/${jobId}/artifacts/file/${encodeURIComponent(item).replaceAll("%2F", "/")}`;
+        await renderArtifacts(jobId);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = original;
+      }
+    }
+
+    async function generateExternalStickman() {
+      const btn = document.getElementById("generateExternalBtn");
+      const original = btn.textContent;
+      const folderPath = document.getElementById("externalFolder").value.trim();
+      const tableName = document.getElementById("externalTable").value.trim();
+      if (!folderPath) {
+        alert("Please provide Motion-capture folder path");
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = "Generating...";
+      try {
+        const params = new URLSearchParams({ folder_path: folderPath });
+        if (tableName) params.set("table_name", tableName);
+        const res = await fetch(`/api/external/motion-capture/stickman?${params.toString()}`, { method: "POST" });
+        const data = await res.json();
+        if (!res.ok) {
+          alert(data.detail || "Failed to generate external stickman animation");
+          return;
+        }
+
+        const jobId = data.job_id;
+        const item = data.artifact;
+        const link = document.getElementById("externalStickmanLink");
+        link.hidden = false;
+        link.href = `/api/jobs/${jobId}/artifacts/file/${encodeURIComponent(item).replaceAll("%2F", "/")}`;
+        currentJobId = jobId;
+        if (pollTimer) clearInterval(pollTimer);
+        await pollJob(jobId);
+        pollTimer = setInterval(() => pollJob(jobId), 4000);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = original;
+      }
+    }
+
+    async function pollJob(jobId) {
+      const statusCard = document.getElementById("statusCard");
+      const reportCard = document.getElementById("reportCard");
+      const resultGrid = document.getElementById("resultGrid");
+      const statusText = document.getElementById("statusText");
+      const logView = document.getElementById("logView");
+      const progressBar = document.getElementById("progressBar");
+      statusCard.hidden = false;
+
+      const [jobRes, logRes] = await Promise.all([
+        fetch(`/api/jobs/${jobId}`),
+        fetch(`/api/jobs/${jobId}/log`),
+      ]);
+
+      if (!jobRes.ok) return;
+      const job = await jobRes.json();
+      const progress = Number(job.progress || 0);
+      statusText.textContent = `Status: ${job.status} | Stage: ${job.stage || "running"}${job.error ? " | Error: " + job.error : ""}`;
+      progressBar.style.width = `${Math.max(2, Math.min(progress, 100))}%`;
+      progressBar.textContent = `${progress}%`;
+
+      if (logRes.ok) {
+        const logData = await logRes.json();
+        logView.textContent = logData.log || "";
+      }
+
+      if (job.status === "completed") {
+        clearInterval(pollTimer);
+        pollTimer = null;
+
+        const repRes = await fetch(`/api/jobs/${jobId}/report`);
+        if (repRes.ok) {
+          const report = await repRes.json();
+          renderReport(report);
+          resultGrid.hidden = false;
+          reportCard.hidden = false;
+          const download = document.getElementById("downloadMd");
+          download.href = `/api/jobs/${jobId}/report.md`;
+          const stickBtn = document.getElementById("generateStickmanBtn");
+          stickBtn.onclick = () => generateStickman(jobId);
+          const fullNodesBtn = document.getElementById("generateFullNodesBtn");
+          fullNodesBtn.onclick = () => generateFullNodes(jobId);
+          const plotsBtn = document.getElementById("generatePlotsBtn");
+          plotsBtn.onclick = () => generatePlots(jobId);
+          await renderArtifacts(jobId);
+        }
+      }
+
+      if (job.status === "failed") {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+
+      await loadJobs();
+    }
+
+    document.getElementById("uploadForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const mode = document.getElementById("mode").value;
+      const fileInput = document.getElementById("video");
+      if (!fileInput.files.length) return;
+
+      const formData = new FormData();
+      formData.append("mode", mode);
+      formData.append("video", fileInput.files[0]);
+
+      const res = await fetch("/api/jobs", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.detail || "Failed to start job");
+        return;
+      }
+
+      currentJobId = data.job_id;
+      if (pollTimer) clearInterval(pollTimer);
+      await pollJob(currentJobId);
+      pollTimer = setInterval(() => pollJob(currentJobId), 4000);
+    });
+
+    document.getElementById("generateExternalBtn").addEventListener("click", generateExternalStickman);
+
+    loadJobs();
+  </script>
+</body>
+</html>

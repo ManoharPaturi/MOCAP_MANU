@@ -1,0 +1,12 @@
+.venv/
+.venv-1/
+**/__pycache__/
+.DS_Store
+MocapAnalyzerApp/jobs/**
+!MocapAnalyzerApp/jobs/
+!MocapAnalyzerApp/jobs/jobs_index.json
+!MocapAnalyzerApp/jobs/jobs_index.json.bak
+V1/results/**
+!V1/results/
+EasyMocap/data/models/*.pth
+EasyMocap/data/models/*.weights

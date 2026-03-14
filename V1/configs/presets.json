@@ -1,0 +1,35 @@
+{
+  "fast": {
+    "model": "smpl",
+    "body": "body25",
+    "gender": "neutral",
+    "thres2d": 0.4,
+    "smooth3d": 0,
+    "max_repro_error": 70,
+    "vis_det": false,
+    "vis_repro": false,
+    "vis_smpl": false
+  },
+  "balanced": {
+    "model": "smpl",
+    "body": "body25",
+    "gender": "neutral",
+    "thres2d": 0.3,
+    "smooth3d": 3,
+    "max_repro_error": 50,
+    "vis_det": false,
+    "vis_repro": false,
+    "vis_smpl": false
+  },
+  "accurate": {
+    "model": "smplx",
+    "body": "bodyhandface",
+    "gender": "neutral",
+    "thres2d": 0.2,
+    "smooth3d": 7,
+    "max_repro_error": 35,
+    "vis_det": true,
+    "vis_repro": true,
+    "vis_smpl": true
+  }
+}
